@@ -1,0 +1,88 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: kafka
+    restart: unless-stopped
+    hostname: kafka
+    networks:
+      default:
+        aliases:
+          - broker
+    ports:
+      - "9094:9094"   # SASL_PLAINTEXT
+      - "9093:9093"   # SSL
+      - "9096:9096"   # SASL_SSL
+    environment:
+      CLUSTER_ID: "kraft-cluster"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9095
+      
+      # ===== Listeners =====
+      KAFKA_LISTENERS: SASL_PLAINTEXT://0.0.0.0:9094,SASL_SSL://0.0.0.0:9096,SSL://0.0.0.0:9093,CONTROLLER://0.0.0.0:9095
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://broker:9094,SASL_SSL://broker:9096,SSL://broker:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,SSL:SSL,CONTROLLER:PLAINTEXT
+
+      # broker pakai SSL untuk komunikasi internal
+      KAFKA_INTER_BROKER_LISTENER_NAME: SSL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # ===== SASL configs =====
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka_server_jaas.conf"
+
+      # ===== TLS configs =====
+      KAFKA_SSL_KEYSTORE_FILENAME: broker.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: broker.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: truststore_creds
+      KAFKA_SSL_CLIENT_AUTH: required
+
+      # ===== Log dirs =====
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - ./kafka:/tmp/kraft-combined-logs
+      - ./secrets:/etc/kafka/secrets
+      - ./certs:/etc/kafka/certs
+   
+  akhq:
+    image: tchiotludo/akhq:0.24.0
+    container_name: akhq
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            docker-kafka:
+              properties:
+                # connect ke broker SASL_SSL
+                bootstrap.servers: broker:9096
+                security.protocol: SASL_SSL
+                sasl.mechanism: PLAIN
+                sasl.jaas.config: "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"admin\" password=\"admin-secret\";"
+
+                # TLS configs
+                ssl.truststore.location: /etc/kafka/certs/client.truststore.jks
+                ssl.truststore.password: changeit
+                ssl.truststore.type: JKS
+
+                ssl.keystore.location: /etc/kafka/certs/client.keystore.jks
+                ssl.keystore.password: changeit
+                ssl.keystore.type: JKS
+
+                # optional, bisa dihapus kalau storepass == keypass
+                ssl.key.password: changeit
+          security:
+            enabled: false
+    volumes:
+      - ./certs:/etc/kafka/certs
+      - ./secrets:/etc/kafka/secrets
+    depends_on:
+      - kafka

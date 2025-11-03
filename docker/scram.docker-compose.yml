@@ -1,0 +1,83 @@
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    container_name: kafka
+    restart: unless-stopped
+    hostname: kafka
+    networks:
+      default:
+        aliases:
+          - broker
+    ports:
+      - "9093:9093"   # SSL (buat bootstrap user SCRAM)
+      - "9096:9096"   # SASL_SSL (SCRAM)
+    environment:
+      CLUSTER_ID: "kraft-cluster"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9095
+
+      # Listeners
+      KAFKA_LISTENERS: SSL://0.0.0.0:9093,SASL_SSL://0.0.0.0:9096,CONTROLLER://0.0.0.0:9095
+      KAFKA_ADVERTISED_LISTENERS: SSL://broker:9093,SASL_SSL://broker:9096
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: SSL:SSL,SASL_SSL:SASL_SSL,CONTROLLER:PLAINTEXT
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_SSL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # SASL config
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-512
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: SCRAM-SHA-512
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka_server_jaas.conf"
+
+      # TLS config
+      KAFKA_SSL_KEYSTORE_FILENAME: broker.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: broker.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: truststore_creds
+      KAFKA_SSL_CLIENT_AUTH: required
+
+      # ===== Log dirs =====
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    volumes:
+      - ./kafka:/tmp/kraft-combined-logs
+      - ./secrets:/etc/kafka/secrets
+      - ./certs:/etc/kafka/certs
+
+  akhq:
+    image: tchiotludo/akhq:0.24.0
+    container_name: akhq
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            docker-kafka:
+              properties:
+                bootstrap.servers: broker:9096
+                security.protocol: SASL_SSL
+                sasl.mechanism: SCRAM-SHA-512
+                sasl.jaas.config: "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"admin\" password=\"admin-secret\";"
+
+                ssl.truststore.location: /etc/kafka/certs/client.truststore.jks
+                ssl.truststore.password: changeit
+                ssl.truststore.type: JKS
+
+                ssl.keystore.location: /etc/kafka/certs/client.keystore.jks
+                ssl.keystore.password: changeit
+                ssl.keystore.type: JKS
+
+                ssl.key.password: changeit
+          security:
+            enabled: false
+    volumes:
+      - ./certs:/etc/kafka/certs
+      - ./secrets:/etc/kafka/secrets
+    depends_on:
+      - kafka
