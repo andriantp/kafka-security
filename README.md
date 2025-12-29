@@ -112,7 +112,6 @@ That article walks through:
 
 Andrian Tri Putra
 - [Medium](https://andriantriputra.medium.com/)
-GitHub
 - [andriantp](https://github.com/andriantp)
 - [AndrianTriPutra](https://github.com/AndrianTriPutra)
 
